@@ -289,6 +289,101 @@ const npc=new THREE.Group();npc.position.set(NPC.x,gy(NPC.x,NPC.z),NPC.z);scene.
 const mk=document.createElement('canvas');mk.width=mk.height=64;{const g=mk.getContext('2d');g.fillStyle='#ffd27a';g.font='bold 56px sans-serif';g.textAlign='center';g.fillText('!',32,52)}
 const mark=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(mk),fog:false,depthTest:false}));mark.scale.set(1.2,1.2,1);mark.position.y=3.4;npc.add(mark);
 
+let activeSketch=null;
+function makeSketchArt(kind,x,z){
+ const art=new THREE.Group(),y=gy(x,z)+.035,strokes=[];
+ art.position.set(x,y,z);scene.add(art);
+ const earth=new THREE.Mesh(new THREE.CircleGeometry(1.65,48),new THREE.MeshBasicMaterial({color:C('#654526'),transparent:true,opacity:.28,depthWrite:false}));
+ earth.rotation.x=-Math.PI/2;earth.position.y=-.018;art.add(earth);
+ const rim=new THREE.Mesh(new THREE.TorusGeometry(1.58,.018,5,48),new THREE.MeshBasicMaterial({color:C('#b9945d'),transparent:true,opacity:.45}));
+ rim.rotation.x=Math.PI/2;rim.position.y=.008;art.add(rim);
+ const addStroke=(points,color)=>{
+  const curve=new THREE.CatmullRomCurve3(points.map(([px,pz])=>new THREE.Vector3(px,.035,pz)),false,'centripetal');
+  const segments=48,radial=5;
+  const glowGeometry=new THREE.TubeGeometry(curve,segments,.085,radial,false);
+  const lineGeometry=new THREE.TubeGeometry(curve,segments,.026,radial,false);
+  glowGeometry.setDrawRange(0,0);lineGeometry.setDrawRange(0,0);
+  art.add(new THREE.Mesh(glowGeometry,new THREE.MeshBasicMaterial({color:C(color),transparent:true,opacity:.22,blending:THREE.AdditiveBlending,depthWrite:false})));
+  art.add(new THREE.Mesh(lineGeometry,new THREE.MeshBasicMaterial({color:C(color),transparent:true,opacity:.96,blending:THREE.AdditiveBlending,depthWrite:false})));
+  strokes.push({points,glowGeometry,lineGeometry,count:segments*radial*6});
+ };
+ if(kind==='tree'){
+  addStroke([[0,-.78],[0,-.35],[.02,.08],[0,.58]],'#f6d487');
+  addStroke([[0,-.2],[-.3,.04],[-.58,.38],[-.28,.28],[0,.79],[.27,.3],[.58,.45],[.32,.02],[0,-.2]],'#a7d8b5');
+  addStroke([[-.62,.34],[-.26,.37],[0,.58],[.25,.37],[.61,.43]],'#dbf4c1');
+ }else{
+  addStroke([[-.82,-.4],[-.5,-.35],[-.18,-.4],[.16,-.35],[.5,-.4],[.82,-.35]],'#74dcf0');
+  addStroke([[-.82,-.08],[-.5,-.03],[-.18,-.08],[.16,-.03],[.5,-.08],[.82,-.03]],'#a5edfa');
+  addStroke([[-.82,.24],[-.5,.29],[-.18,.24],[.16,.29],[.5,.24],[.82,.29]],'#74dcf0');
+  const sun=[];for(let i=0;i<=36;i++){const a=i/36*Math.PI*2;sun.push([.2+Math.cos(a)*.34,.9+Math.sin(a)*.34])}
+  addStroke(sun,'#ffdf84');
+  for(let i=0;i<8;i++){const a=i*Math.PI/4;addStroke([[.2+Math.cos(a)*.47,.9+Math.sin(a)*.47],[.2+Math.cos(a)*.63,.9+Math.sin(a)*.63]],'#fff0bb')}
+ }
+ return {art,strokes,x,z,y};
+}
+const sketchTool=new THREE.Group();scene.add(sketchTool);
+const toolShaft=new THREE.Mesh(new THREE.CylinderGeometry(.018,.012,.52,8),std('#76502d'));
+toolShaft.position.y=.28;toolShaft.castShadow=true;sketchTool.add(toolShaft);
+const toolTip=new THREE.Mesh(new THREE.ConeGeometry(.035,.12,8),std('#f1cf75'));
+toolTip.position.y=-.035;toolTip.rotation.z=Math.PI;toolTip.castShadow=true;sketchTool.add(toolTip);
+sketchTool.visible=false;
+const easeInOut=x=>x*x*(3-2*x);
+function beginGroundSketch(kind){
+ const fx=cartAnim.direction.x,fz=cartAnim.direction.z,sx=-fz,sz=fx;
+ const x=cart.position.x+fx*4.2+sx*1.8,z=cart.position.z+fz*4.2+sz*1.8;
+ const art=makeSketchArt(kind,x,z),drawX=x-fx*1.8,drawZ=z-fz*1.8;
+ const cameraOffset=new THREE.Vector3().subVectors(cam.position,tgt);
+ activeSketch={
+  kind,art,phase:'approach',time:0,from:npc.position.clone(),fromRotation:npc.rotation.y,fx,fz,
+  stand:new THREE.Vector3(drawX,gy(drawX,drawZ),drawZ),standRotation:Math.atan2(fx,fz),
+  camera:{yaw,pitch,distT,target:tgt.clone()},
+  focusYaw:Math.atan2(cameraOffset.x,cameraOffset.z),
+  focusTarget:new THREE.Vector3(x,gy(x,z)+.65,z),focusDist:7
+ };
+ mark.visible=false;
+}
+function updateGroundSketch(dt){
+ const sketch=activeSketch;if(!sketch)return;
+ sketch.time+=dt;
+ if(sketch.phase==='approach'){
+  const p=easeInOut(clamp(sketch.time/.75,0,1));
+  npc.position.lerpVectors(sketch.from,sketch.stand,p);
+  npc.position.y+=Math.abs(Math.sin(sketch.time*13))*.045;
+  npc.rotation.y=sketch.fromRotation+Math.atan2(Math.sin(sketch.standRotation-sketch.fromRotation),Math.cos(sketch.standRotation-sketch.fromRotation))*p;
+  if(p>=1){sketch.phase='draw';sketch.time=0;sketchTool.visible=true}
+ }else if(sketch.phase==='draw'){
+  const progress=clamp(sketch.time/2.8,0,1),scaled=progress*sketch.art.strokes.length;
+  sketch.art.strokes.forEach((stroke,i)=>{
+   const reveal=clamp(scaled-i,0,1),count=Math.floor(stroke.count*reveal/3)*3;
+   stroke.glowGeometry.setDrawRange(0,count);stroke.lineGeometry.setDrawRange(0,count);
+  });
+  const index=Math.min(sketch.art.strokes.length-1,Math.floor(scaled));
+  const stroke=sketch.art.strokes[index],u=clamp(scaled-index,0,1),points=stroke.points;
+  const segment=Math.min(points.length-2,Math.floor(u*(points.length-1))),part=u*(points.length-1)-segment;
+  const px=THREE.MathUtils.lerp(points[segment][0],points[segment+1][0],part),pz=THREE.MathUtils.lerp(points[segment][1],points[segment+1][1],part);
+  sketchTool.position.set(sketch.art.x+px,gy(sketch.art.x+px,sketch.art.z+pz)+.18,sketch.art.z+pz);
+  sketchTool.rotation.set(.18,0,Math.sin(sketch.time*5)*.12);
+  if(progress>=1){sketch.phase='return';sketch.time=0;sketchTool.visible=false}
+ }else if(sketch.phase==='return'){
+  const p=easeInOut(clamp(sketch.time/.75,0,1));
+  const x=cart.position.x+sketch.fx*3.35,z=cart.position.z+sketch.fz*3.35;
+  npc.position.lerpVectors(sketch.stand,new THREE.Vector3(x,gy(x,z),z),p);
+  npc.position.y+=Math.abs(Math.sin(sketch.time*13))*.045;
+  if(p>=1){
+   npc.rotation.y=sketch.standRotation;npc.rotation.x=0;
+   yaw=sketch.camera.yaw;pitch=sketch.camera.pitch;distT=sketch.camera.distT;tgt.copy(sketch.camera.target);
+   mark.visible=true;activeSketch=null;
+   return;
+  }
+ }
+ npc.rotation.x=sketch.phase==='draw'?.18:0;
+ const cameraEase=cfg.reduceMotion?1:Math.min(1,dt*2.3);
+ yaw+=Math.atan2(Math.sin(sketch.focusYaw-yaw),Math.cos(sketch.focusYaw-yaw))*cameraEase;
+ pitch=THREE.MathUtils.lerp(pitch,1.05,cameraEase);
+ distT=THREE.MathUtils.lerp(distT,sketch.focusDist,cameraEase);
+ tgt.lerp(sketch.focusTarget,cameraEase);
+}
+
 // Charrette
 const cart=new THREE.Group();scene.add(cart);
 box(2.2,.5,1.4,'#7a4a2a',0,.85,0,cart);box(2,.5,.12,'#5a3418',0,1.3,.7,cart);box(2,.5,.12,'#5a3418',0,1.3,-.7,cart);
@@ -343,13 +438,26 @@ function tvSet(name,rx,ry,rz){const b=TVRM.bones[name];if(!b)return;
 function tvPose(dt){
  const motionScale=cfg.reduceMotion ? .15 : 1;
  const pulling=cartAnim.active,step=Math.sin(cartAnim.t*7)*motionScale,sway=Math.sin(cartAnim.t*14)*motionScale;
- if(pulling){
+ if(pulling&&!activeSketch){
   const dx=cartAnim.direction.x,dz=cartAnim.direction.z;
   const x=cart.position.x+dx*3.35,z=cart.position.z+dz*3.35;
   npc.position.set(x,gy(x,z)+Math.abs(sway)*.018,z);
   npc.rotation.y=Math.atan2(dx,dz);
  }
  if(!TVRM.ok)return;
+ if(activeSketch){
+  const drawing=activeSketch.phase==='draw';
+  const walking=activeSketch.phase==='approach'||activeSketch.phase==='return';
+  const gesture=Math.sin(activeSketch.time*5)*motionScale,stride=walking?Math.sin(activeSketch.time*13)*.42*motionScale:0;
+  tvSet('spine',drawing?-.34+gesture*.018:0,0,drawing?-.08:0);
+  tvSet('chest',drawing?-.12:0,0,0);tvSet('head',drawing?.24:0,0,drawing?-.08:0);
+  tvSet('leftUpperArm',drawing?-.48:stride*.35,0,drawing?-.32:-.1);
+  tvSet('rightUpperArm',drawing?-.82:-stride*.35,0,drawing?.24:.08);
+  tvSet('leftLowerArm',0,drawing?.5:.08,0);tvSet('rightLowerArm',0,drawing?1.12:.08,0);
+  tvSet('leftUpperLeg',drawing?1.05:stride,0,0);tvSet('rightUpperLeg',drawing?1.05:-stride,0,0);
+  tvSet('leftLowerLeg',drawing?-1.05:Math.max(0,-stride),0,0);tvSet('rightLowerLeg',drawing?-1.05:Math.max(0,stride),0,0);
+  return;
+ }
  const bounce=pulling?Math.abs(sway)*.02:0,walk=pulling?step*.42:0,pull=1+Math.sin(cartAnim.t*2.8)*.025*motionScale;
  TVRM.holder.position.set(0,bounce,0);
  tvSet('spine',pulling?-.06:Math.sin(t*1.5)*.008,0,pulling?Math.sin(cartAnim.t*2.8)*.018:0);
@@ -493,6 +601,7 @@ const lines=['Encore une soirée tranquille, allongé sur mon lit…','Hein ? Ce
 let st='intro',li=0,t=0,hint=0,last=0,stage=0,dq=[],got=[0,0,0],afterQ=null,gold=0,kills=0,swing=0,invulnerable=0,playerHearts=3;
 const cartAnim={active:false,t:0,duration:12,startPos:new THREE.Vector3(),endPos:new THREE.Vector3(),direction:new THREE.Vector3(),heading:0};
 const cartSeatPos=new THREE.Vector3();
+const encounterPoint=new THREE.Vector3();
 const pic=$('pic'),dl=$('dlg'),ob=$('obj');let dk='',ot='';
 function updateHearts(){let h='';for(let i=0;i<3;i++)h+=i<playerHearts?'❤️':'🖤';$('hearts').textContent=h;$('hearts').setAttribute('aria-label',playerHearts+' cœur(s)')}
 function dlgShow(x,n){const k=n+'|'+x;if(k!==dk){dk=k;dl.innerHTML=(n?'<b>'+n+'</b>':'')+'<span>'+x+'</span><i>▶</i>'}dl.style.display='block'}
@@ -502,7 +611,7 @@ const fl=document.createElement('div');fl.style.cssText='position:fixed;inset:0;
 const nGot=()=>got.filter(Boolean).length;
 const pos=new THREE.Vector3(60,0,9);pos.y=gy(pos.x,pos.z);
 let currentVx=0,currentVz=0;
-const Q=(a,f)=>{dq=a.map(([n,t,p])=>({n,t,p}));afterQ=f||null};
+const Q=(a,f)=>{dq=a.map(([n,t,p,scene])=>({n,t,p,scene,sceneStarted:false}));afterQ=f||null};
 const fade=()=>{fl.style.background='#000';fl.style.opacity=1};
 function cut(x,z,nx,nz){fade();pos.set(x,gy(x,z),z);vy=0;NPC.x=nx;NPC.z=nz;npc.position.set(nx,gy(nx,nz),nz);cart.position.set(nx-2.4,gy(nx,nz),nz);cart.rotation.y=-Math.PI/2;tgt.set(x,pos.y+1.7,z)}
 cart.position.set(NPC.x-2.4,gy(NPC.x,NPC.z),NPC.z);cart.rotation.y=-Math.PI/2;
@@ -511,6 +620,7 @@ function act(){
  if(menuOpen)return;
  if(st==='intro'){li++;if(li>=lines.length){st='portal';t=0}return}
  if(st!=='world')return;
+ if(activeSketch)return;
  if(stage===1)strike();else if(!dq.length&&hint<=0)swing=.3;
  if(dq.length){dq.shift();if(!dq.length&&afterQ){const f=afterQ;afterQ=null;f()}return}
  if(hint>0){hint=0;return}
@@ -529,7 +639,7 @@ function meet(){Q([
 
 function startCartAnimation(){
  cartAnim.active=true;cartAnim.t=0;
- cartAnim.startPos.copy(cart.position);cartAnim.endPos.set(60,gy(60,30),30);
+ cartAnim.startPos.copy(cart.position);cartAnim.endPos.set(100,gy(100,14),14);
  cartAnim.direction.set(cartAnim.endPos.x-cartAnim.startPos.x,0,cartAnim.endPos.z-cartAnim.startPos.z).normalize();
  cartAnim.heading=Math.atan2(-cartAnim.direction.x,-cartAnim.direction.z);
  cart.rotation.y=cartAnim.heading;
@@ -537,15 +647,16 @@ function startCartAnimation(){
   ['','En route vers le royaume… Le voyage va durer deux jours.'],
   ['Voyageur','Orin. (Il se tapote la poitrine.)',['🧔','Orin']],
   ['Moi','Orin ? … Moi, c’est… (Tu te présentes.)'],
-  ['Orin','Arbo ! (Il dessine un arbre dans la poussière.)',['🌳','Arbo']],
-  ['Orin','Aqua. Sol. (Il dessine de l’eau et un soleil.)',['💧☀️','Aqua · Sol']],
+  ['Orin','Arbo ! (Il pose le pied à terre et dessine un arbre dans la poussière.)',['🌳','Arbo'],'tree'],
+  ['Orin','Aqua. Sol. (Il dessine l’eau et le soleil à côté de l’arbre.)',['💧☀️','Aqua · Sol'],'water'],
   ['Moi','Arbo… Aqua… Sol… Je commence à comprendre !'],
   ['','Jour 2. Des brigands surgissent des buissons pour attaquer la charrette !']],fight)}
 
 function fight(){
  cartAnim.active=false;hero.visible=true;
- cut(60,30,61,36);stage=1;kills=0;R.toneMappingExposure=1.25;
- BANDITS.forEach((b,i)=>{const o=[[-9,-6],[9,-5],[0,-11]][i];b.x=60+o[0];b.z=30+o[1];b.hp=2;b.dead=0;b.g.rotation.x=0;b.g.visible=true});
+ const x=Math.round(cart.position.x),z=Math.round(cart.position.z);
+ cut(x+3,z,x,z);encounterPoint.copy(pos);stage=1;kills=0;R.toneMappingExposure=1.25;
+ BANDITS.forEach((b,i)=>{const o=[[-9,-6],[9,-5],[0,-11]][i];b.x=pos.x+o[0];b.z=pos.z+o[1];b.hp=2;b.dead=0;b.g.rotation.x=0;b.g.visible=true});
  Q([['Voyageur','« Bandi ! Bandi ! »'],['Moi','Des bandits ! Je prends mon épée ! (Appuie sur ⚔️ pour attaquer.)']])}
 
 function strike(){
@@ -586,16 +697,16 @@ function update(dt){
  if(invulnerable>0)invulnerable-=dt;
 
  if(cartAnim.active){
-  cartAnim.t+=dt;const progress=Math.min(1,cartAnim.t/cartAnim.duration),p=progress*progress*(3-2*progress);
+  if(!activeSketch)cartAnim.t=Math.min(cartAnim.duration,cartAnim.t+dt);
+  const progress=Math.min(1,cartAnim.t/cartAnim.duration),p=progress*progress*(3-2*progress);
   const cx=THREE.MathUtils.lerp(cartAnim.startPos.x,cartAnim.endPos.x,p),cz=THREE.MathUtils.lerp(cartAnim.startPos.z,cartAnim.endPos.z,p),cy=gy(cx,cz);
   cart.position.set(cx,cy+Math.sin(cartAnim.t*5.2)*.018*motionScale,cz);
   cart.rotation.set(Math.sin(cartAnim.t*2.6)*.008*motionScale,cartAnim.heading,Math.sin(cartAnim.t*3.1)*.012*motionScale);
-  wheels.forEach(w=>w.rotation.z+=dt*4*motionScale);
-  cartModel.wheels.forEach(w=>w.rotation.x+=dt*10*motionScale);
+  if(!activeSketch){wheels.forEach(w=>w.rotation.z+=dt*4*motionScale);cartModel.wheels.forEach(w=>w.rotation.x+=dt*10*motionScale)}
   R.toneMappingExposure=1.25-.5*Math.sin(Math.PI*p); // le jour décline pendant le trajet
   tgt.set(cx,cy+1.5,cz);pos.set(cx,cy,cz);
-  if(progress>=1)fight();
  }
+ updateGroundSketch(dt);
 
  let ix=(keys.r?1:0)-(keys.l?1:0)+joy.x+pd.x,iy=(keys.d?1:0)-(keys.u?1:0)+joy.y+pd.y;if(locked||cartAnim.active)ix=iy=0;
  const m0=Math.hypot(ix,iy),mg=Math.min(1,m0);if(m0>1){ix/=m0;iy/=m0}
@@ -662,7 +773,7 @@ function update(dt){
   if(d>1.2){b.x+=(dx/d)*2.2*dt;b.z+=(dz/d)*2.2*dt}
   else if(invulnerable<=0&&!locked){
    playerHearts=Math.max(0,playerHearts-1);updateHearts();invulnerable=1.2;burst(pos.x,1.2,pos.z,'#ff4040',8);
-   if(playerHearts<=0){playerHearts=3;updateHearts();pos.set(60,gy(60,30),30)}
+   if(playerHearts<=0){playerHearts=3;updateHearts();pos.copy(encounterPoint)}
   }
   b.fl-=dt;b.g.scale.setScalar(1+Math.max(0,b.fl)*.4);
   b.g.position.set(b.x,gy(b.x,b.z)+(d>1.2?Math.abs(Math.sin(t*9+b.x))*.15*motionScale:0),b.z);
@@ -670,7 +781,7 @@ function update(dt){
  });
 
  // Ambiance : voyageur qui te regarde, eau, particules
- {let da=Math.atan2(pos.x-NPC.x,pos.z-NPC.z)-npc.rotation.y;da=Math.atan2(Math.sin(da),Math.cos(da));npc.rotation.y+=da*Math.min(1,dt*4);
+ {if(!activeSketch){let da=Math.atan2(pos.x-NPC.x,pos.z-NPC.z)-npc.rotation.y;da=Math.atan2(Math.sin(da),Math.cos(da));npc.rotation.y+=da*Math.min(1,dt*4)}
   npc.scale.y=1+Math.sin(t*2)*.02*motionScale;tvPose(dt);mark.position.y=3.4+Math.sin(t*3)*.15*motionScale;water.position.y=-.5+Math.sin(t*.8)*.05*motionScale;
   for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.l-=dt;f.s.position.addScaledVector(f.v,dt*motionScale);f.v.y-=6*dt*motionScale;f.s.material.opacity=Math.max(0,f.l);if(f.l<=0){scene.remove(f.s);fx.splice(i,1)}}}
 
@@ -685,6 +796,7 @@ function update(dt){
  const o=objText();if(o!==ot){ot=o;ob.textContent='Objectif : '+o}
  $('chapter').textContent=['Le réveil','L’embuscade','Le village','La guilde','Les reliques','La dette'][stage]||'Aventure';
  $('crystal-count').textContent=nGot()+' / 3';$('inventory').style.display=stage>=4?'block':'none';
+ if(dq.length&&dq[0].scene&&!dq[0].sceneStarted){dq[0].sceneStarted=true;beginGroundSketch(dq[0].scene)}
  if(dq.length){dlgShow(dq[0].t,dq[0].n);const p=dq[0].p,pk=p?p.join('|'):'';if(pic.dataset.k!==pk){pic.dataset.k=pk;pic.innerHTML=p?'<span>'+p[0]+'</span><b>'+p[1]+'</b>':''}pic.style.display=p?'flex':'none'}
  else if(hint>0){hint-=dt;dlgShow('Où suis-je ?! Un voyageur est là-bas…','')}else dlgHide()
 }
