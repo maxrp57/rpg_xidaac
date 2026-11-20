@@ -274,7 +274,7 @@ function vrmPose(){
  vrmSet('leftLowerLeg',-kn(lL),0,0);vrmSet('rightLowerLeg',-kn(lR),0,0);
 }
 
-const npc=new THREE.Group();npc.position.set(NPC.x,gy(NPC.x,NPC.z),NPC.z);scene.add(npc);
+const npc=new THREE.Group();npc.position.set(NPC.x,gy(NPC.x,NPC.z),NPC.z);scene.add(npc);const sketchArm={};
 {const m=new THREE.Mesh(new THREE.ConeGeometry(.8,1.7,10),std('#8a5a2a'));m.position.y=.85;m.castShadow=true;npc.add(m);
  const hd=new THREE.Mesh(new THREE.SphereGeometry(.38,12,10),std('#e6a55d'));hd.position.y=1.95;hd.castShadow=true;npc.add(hd);
  box(.07,.07,.04,'#222',-.13,1.97,.36,npc);box(.07,.07,.04,'#222',.13,1.97,.36,npc);
@@ -283,7 +283,16 @@ const npc=new THREE.Group();npc.position.set(NPC.x,gy(NPC.x,NPC.z),NPC.z);scene.
  box(.12,.05,.04,'#e8e4dc',-.13,2.06,.36,npc);box(.12,.05,.04,'#e8e4dc',.13,2.06,.36,npc);
  mm(new THREE.CylinderGeometry(.64,.64,.06,14),'#5a3a1e',0,2.3,0);mm(new THREE.CylinderGeometry(.3,.38,.4,12),'#5a3a1e',0,2.5,0);mm(new THREE.CylinderGeometry(.39,.39,.1,12),'#c0392b',0,2.38,0);
  { const sc=mm(new THREE.TorusGeometry(.42,.1,6,14),'#c0392b',0,1.62,0);sc.rotation.x=Math.PI/2 }
- [-1,1].forEach(sx=>{const a=mm(new THREE.CylinderGeometry(.1,.12,.8,6),'#8a5a2a',sx*.72,1.15,.05);a.rotation.z=sx*.35;mm(new THREE.SphereGeometry(.11,8,6),'#e6a55d',sx*.9,.78,.05)});
+ [-1,1].forEach(sx=>{
+  const side=sx<0?'left':'right',upper=new THREE.Group();upper.position.set(sx*.56,1.5,.05);npc.add(upper);
+  const upperMesh=new THREE.Mesh(new THREE.CylinderGeometry(.1,.12,.42,6),std('#8a5a2a'));upperMesh.position.y=-.21;upper.add(upperMesh);
+  const lower=new THREE.Group();lower.position.y=-.42;upper.add(lower);
+  const lowerMesh=new THREE.Mesh(new THREE.CylinderGeometry(.085,.1,.38,6),std('#8a5a2a'));lowerMesh.position.y=-.19;lower.add(lowerMesh);
+  const hand=new THREE.Group();hand.position.y=-.38;lower.add(hand);
+  const palm=new THREE.Mesh(new THREE.SphereGeometry(.11,8,6),std('#e6a55d'));hand.add(palm);
+  upper.rotation.z=sx*.35;
+  sketchArm[side]={upper,lower,hand};
+ });
  box(.42,.46,.2,'#6b4423',.6,.85,.45,npc);
  mm(new THREE.CylinderGeometry(.04,.04,2.7,6),'#4d2e16',-1.0,1.35,.35);mm(new THREE.SphereGeometry(.13,8,6),'#7de3ff',-1.0,2.75,.35)}
 const mk=document.createElement('canvas');mk.width=mk.height=64;{const g=mk.getContext('2d');g.fillStyle='#ffd27a';g.font='bold 56px sans-serif';g.textAlign='center';g.fillText('!',32,52)}
@@ -292,7 +301,7 @@ const mark=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTextur
 let activeSketch=null;
 function makeSketchArt(kind,x,z){
  const art=new THREE.Group(),y=gy(x,z)+.035,strokes=[];
- art.position.set(x,y,z);scene.add(art);
+ art.position.set(x,y,z);art.scale.setScalar(.62);scene.add(art);
  const earth=new THREE.Mesh(new THREE.CircleGeometry(1.65,48),new THREE.MeshBasicMaterial({color:C('#654526'),transparent:true,opacity:.28,depthWrite:false}));
  earth.rotation.x=-Math.PI/2;earth.position.y=-.018;art.add(earth);
  const rim=new THREE.Mesh(new THREE.TorusGeometry(1.58,.018,5,48),new THREE.MeshBasicMaterial({color:C('#b9945d'),transparent:true,opacity:.45}));
@@ -300,12 +309,13 @@ function makeSketchArt(kind,x,z){
  const addStroke=(points,color)=>{
   const curve=new THREE.CatmullRomCurve3(points.map(([px,pz])=>new THREE.Vector3(px,.035,pz)),false,'centripetal');
   const segments=48,radial=5;
-  const glowGeometry=new THREE.TubeGeometry(curve,segments,.085,radial,false);
-  const lineGeometry=new THREE.TubeGeometry(curve,segments,.026,radial,false);
+  const glowGeometry=new THREE.TubeGeometry(curve,segments,.045,radial,false);
+  const lineGeometry=new THREE.TubeGeometry(curve,segments,.014,radial,false);
   glowGeometry.setDrawRange(0,0);lineGeometry.setDrawRange(0,0);
   art.add(new THREE.Mesh(glowGeometry,new THREE.MeshBasicMaterial({color:C(color),transparent:true,opacity:.22,blending:THREE.AdditiveBlending,depthWrite:false})));
   art.add(new THREE.Mesh(lineGeometry,new THREE.MeshBasicMaterial({color:C(color),transparent:true,opacity:.96,blending:THREE.AdditiveBlending,depthWrite:false})));
-  strokes.push({points,glowGeometry,lineGeometry,count:segments*radial*6});
+  let length=0;for(let i=1;i<points.length;i++)length+=Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]);
+  strokes.push({points,curve,glowGeometry,lineGeometry,count:segments*radial*6,length});
  };
  if(kind==='tree'){
   addStroke([[0,-.78],[0,-.35],[.02,.08],[0,.58]],'#f6d487');
@@ -326,19 +336,35 @@ const toolShaft=new THREE.Mesh(new THREE.CylinderGeometry(.018,.012,.52,8),std('
 toolShaft.position.y=.28;toolShaft.castShadow=true;sketchTool.add(toolShaft);
 const toolTip=new THREE.Mesh(new THREE.ConeGeometry(.035,.12,8),std('#f1cf75'));
 toolTip.position.y=-.035;toolTip.rotation.z=Math.PI;toolTip.castShadow=true;sketchTool.add(toolTip);
+const sketchPenScale=1.1,sketchPenTipOffset=.095;
+sketchArm.right.hand.add(sketchTool);sketchTool.position.set(0,0,.08);sketchTool.scale.setScalar(sketchPenScale);
+const sketchHandWorldPosition=new THREE.Vector3(),sketchToolWorldPosition=new THREE.Vector3(),sketchHandWorldRotation=new THREE.Quaternion();
 sketchTool.visible=false;
+function positionSketchPen(hand,crouch){
+ hand.updateWorldMatrix(true,false);hand.getWorldPosition(sketchHandWorldPosition);
+ const tipY=gy(sketchHandWorldPosition.x,sketchHandWorldPosition.z)+.015+sketchPenTipOffset*sketchPenScale;
+ sketchToolWorldPosition.set(sketchHandWorldPosition.x,THREE.MathUtils.lerp(sketchHandWorldPosition.y,tipY,crouch),sketchHandWorldPosition.z);
+ sketchTool.position.copy(hand.worldToLocal(sketchToolWorldPosition));
+ hand.getWorldQuaternion(sketchHandWorldRotation);sketchTool.quaternion.copy(sketchHandWorldRotation).invert();
+}
 const easeInOut=x=>x*x*(3-2*x);
+const setSketchCrouch=(sketch,amount)=>{
+ sketch.crouch=amount;
+ const hips=TVRM.bones.hips;
+ if(hips)hips.n.position.y=hips.position.y-.95*amount;
+ npc.position.y=sketch.stand.y+(TVRM.ok ? .1 : 0)*amount;
+};
 function beginGroundSketch(kind){
  const fx=cartAnim.direction.x,fz=cartAnim.direction.z,sx=-fz,sz=fx;
  const x=cart.position.x+fx*4.2+sx*1.8,z=cart.position.z+fz*4.2+sz*1.8;
- const art=makeSketchArt(kind,x,z),drawX=x-fx*1.8,drawZ=z-fz*1.8;
+ const art=makeSketchArt(kind,x,z),drawX=x-fx*.78,drawZ=z-fz*.78;
  const cameraOffset=new THREE.Vector3().subVectors(cam.position,tgt);
  activeSketch={
-  kind,art,phase:'approach',time:0,from:npc.position.clone(),fromRotation:npc.rotation.y,fx,fz,
+  kind,art,phase:'approach',time:0,crouch:0,aligned:false,from:npc.position.clone(),fromRotation:npc.rotation.y,fx,fz,
   stand:new THREE.Vector3(drawX,gy(drawX,drawZ),drawZ),standRotation:Math.atan2(fx,fz),
   camera:{yaw,pitch,distT,target:tgt.clone()},
   focusYaw:Math.atan2(cameraOffset.x,cameraOffset.z),
-  focusTarget:new THREE.Vector3(x,gy(x,z)+.65,z),focusDist:7
+  focusTarget:new THREE.Vector3(x,gy(x,z)+.65,z),focusDist:5.5
  };
  mark.visible=false;
 }
@@ -348,34 +374,60 @@ function updateGroundSketch(dt){
  if(sketch.phase==='approach'){
   const p=easeInOut(clamp(sketch.time/.75,0,1));
   npc.position.lerpVectors(sketch.from,sketch.stand,p);
-  npc.position.y+=Math.abs(Math.sin(sketch.time*13))*.045;
+  npc.position.y+=Math.sin(sketch.time*Math.PI*4)*.025*Math.sin(Math.PI*p);
   npc.rotation.y=sketch.fromRotation+Math.atan2(Math.sin(sketch.standRotation-sketch.fromRotation),Math.cos(sketch.standRotation-sketch.fromRotation))*p;
-  if(p>=1){sketch.phase='draw';sketch.time=0;sketchTool.visible=true}
+  if(p>=1){sketch.phase='kneel';sketch.time=0;sketchTool.visible=true}
+ }else if(sketch.phase==='kneel'){
+  const p=easeInOut(clamp(sketch.time/.75,0,1));setSketchCrouch(sketch,p);
+  if(p>=1){sketch.phase='draw';sketch.time=0}
  }else if(sketch.phase==='draw'){
-  const progress=clamp(sketch.time/2.8,0,1),scaled=progress*sketch.art.strokes.length;
-  sketch.art.strokes.forEach((stroke,i)=>{
-   const reveal=clamp(scaled-i,0,1),count=Math.floor(stroke.count*reveal/3)*3;
+  setSketchCrouch(sketch,1);
+  if(!sketch.aligned){
+   const hand=TVRM.ok&&TVRM.bones.rightHand?TVRM.bones.rightHand.n:sketchArm.right.hand;
+   if(hand){
+    npc.updateMatrixWorld(true);hand.updateWorldMatrix(true,false);hand.getWorldPosition(sketchHandWorldPosition);
+    sketch.art.x=sketchHandWorldPosition.x;sketch.art.z=sketchHandWorldPosition.z;
+    sketch.art.y=gy(sketch.art.x,sketch.art.z)+.035;
+    sketch.art.art.position.set(sketch.art.x,sketch.art.y,sketch.art.z);
+    sketch.focusTarget.set(sketch.art.x,gy(sketch.art.x,sketch.art.z)+.65,sketch.art.z);
+   }
+   sketch.aligned=true;
+  }
+  const totalLength=sketch.art.strokes.reduce((sum,stroke)=>sum+stroke.length,0);
+  const duration=Math.max(6,sketch.art.strokes.length*.72),progress=clamp(sketch.time/duration,0,1);
+  let remaining=progress*totalLength,index=sketch.art.strokes.length-1;
+  for(let i=0;i<sketch.art.strokes.length;i++){
+   const stroke=sketch.art.strokes[i],reveal=clamp(remaining/stroke.length,0,1);
+   const count=Math.floor(stroke.count*reveal/3)*3;
    stroke.glowGeometry.setDrawRange(0,count);stroke.lineGeometry.setDrawRange(0,count);
-  });
-  const index=Math.min(sketch.art.strokes.length-1,Math.floor(scaled));
-  const stroke=sketch.art.strokes[index],u=clamp(scaled-index,0,1),points=stroke.points;
-  const segment=Math.min(points.length-2,Math.floor(u*(points.length-1))),part=u*(points.length-1)-segment;
-  const px=THREE.MathUtils.lerp(points[segment][0],points[segment+1][0],part),pz=THREE.MathUtils.lerp(points[segment][1],points[segment+1][1],part);
-  sketchTool.position.set(sketch.art.x+px,gy(sketch.art.x+px,sketch.art.z+pz)+.18,sketch.art.z+pz);
-  sketchTool.rotation.set(.18,0,Math.sin(sketch.time*5)*.12);
-  if(progress>=1){sketch.phase='return';sketch.time=0;sketchTool.visible=false}
+   if(reveal<1){index=i;break}
+   remaining-=stroke.length;
+  }
+  const stroke=sketch.art.strokes[index],u=clamp(remaining/stroke.length,0,1);
+  sketch.drawMotion=Math.sin(u*Math.PI*2);
+  if(progress>=1){sketch.phase='rise';sketch.time=0;sketchTool.visible=false}
+ }else if(sketch.phase==='rise'){
+   const p=easeInOut(clamp(sketch.time/.75,0,1));setSketchCrouch(sketch,1-p);
+   if(p>=1){sketch.phase='return';sketch.time=0}
  }else if(sketch.phase==='return'){
   const p=easeInOut(clamp(sketch.time/.75,0,1));
   const x=cart.position.x+sketch.fx*3.35,z=cart.position.z+sketch.fz*3.35;
   npc.position.lerpVectors(sketch.stand,new THREE.Vector3(x,gy(x,z),z),p);
-  npc.position.y+=Math.abs(Math.sin(sketch.time*13))*.045;
+  npc.position.y+=Math.sin(sketch.time*Math.PI*4)*.025*Math.sin(Math.PI*p);
   if(p>=1){
    npc.rotation.y=sketch.standRotation;npc.rotation.x=0;
    yaw=sketch.camera.yaw;pitch=sketch.camera.pitch;distT=sketch.camera.distT;tgt.copy(sketch.camera.target);
    mark.visible=true;activeSketch=null;
+   if(!TVRM.ok){sketchArm.right.upper.rotation.set(0,0,.35);sketchArm.right.lower.rotation.set(0,0,0)}
    return;
   }
  }
+ if(!TVRM.ok){
+  const stride=sketch.phase==='approach'||sketch.phase==='return'?Math.sin(sketch.time*Math.PI*4)*.08:0,motion=sketch.phase==='draw'?(sketch.drawMotion||0):0;
+  sketchArm.right.upper.rotation.set(-.62*sketch.crouch-stride,0,.3+motion*.14);
+  sketchArm.right.lower.rotation.set(-.92*sketch.crouch+motion*.28,0,0);
+   if(sketch.crouch>0)positionSketchPen(sketchArm.right.hand,sketch.crouch);
+  }
  npc.rotation.x=sketch.phase==='draw'?.18:0;
  const cameraEase=cfg.reduceMotion?1:Math.min(1,dt*2.3);
  yaw+=Math.atan2(Math.sin(sketch.focusYaw-yaw),Math.cos(sketch.focusYaw-yaw))*cameraEase;
@@ -420,12 +472,16 @@ const TVRM={ok:false,bones:{},holder:null};
   const want=['hips','spine','chest','head','leftUpperArm','rightUpperArm','leftLowerArm','rightLowerArm','leftHand','rightHand','leftUpperLeg','rightUpperLeg','leftLowerLeg','rightLowerLeg'];
   ['Index','Middle','Ring','Little'].forEach(f=>['Proximal','Intermediate','Distal'].forEach(p=>want.push('left'+f+p,'right'+f+p)));
   const nodes=await Promise.all(want.map(n=>hb[n]&&hb[n].node!=null?gltf.parser.getDependency('node',hb[n].node):null));
-  want.forEach((n,i)=>{if(nodes[i])TVRM.bones[n]={n:nodes[i],rest:nodes[i].quaternion.clone()}});
+  want.forEach((n,i)=>{if(nodes[i])TVRM.bones[n]={n:nodes[i],rest:nodes[i].quaternion.clone(),position:nodes[i].position.clone()}});
   const sc=gltf.scene;
   sc.traverse(o=>{if(o.isMesh||o.isSkinnedMesh){o.frustumCulled=false;o.castShadow=true;
    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{m.toneMapped=false})}});
   const holder=new THREE.Group();holder.scale.setScalar(1.1);holder.add(sc);   // même échelle que le héros
   npc.children.forEach(c=>{if(c!==mark)c.visible=false});                       // on masque l'ancien voyageur, on garde le « ! »
+  if(TVRM.bones.rightHand){
+   TVRM.bones.rightHand.n.add(sketchTool);sketchTool.position.set(0,0,.08);
+   sketchTool.scale.setScalar(sketchPenScale);
+  }
   npc.add(holder);TVRM.holder=holder;TVRM.ok=true;
  }).catch(e=>console.warn('Chargement du voyageur VRM impossible, voyageur d’origine conservé :',e));
  // on attend que le héros soit prêt pour ne pas décoder deux gros modèles en même temps
@@ -445,17 +501,26 @@ function tvPose(dt){
   npc.rotation.y=Math.atan2(dx,dz);
  }
  if(!TVRM.ok)return;
+ if(TVRM.bones.rightHand)TVRM.bones.rightHand.n.position.copy(TVRM.bones.rightHand.position);
  if(activeSketch){
-  const drawing=activeSketch.phase==='draw';
+  const drawing=activeSketch.phase==='draw',crouch=activeSketch.crouch||0;
   const walking=activeSketch.phase==='approach'||activeSketch.phase==='return';
-  const gesture=Math.sin(activeSketch.time*5)*motionScale,stride=walking?Math.sin(activeSketch.time*13)*.42*motionScale:0;
-  tvSet('spine',drawing?-.34+gesture*.018:0,0,drawing?-.08:0);
-  tvSet('chest',drawing?-.12:0,0,0);tvSet('head',drawing?.24:0,0,drawing?-.08:0);
-  tvSet('leftUpperArm',drawing?-.48:stride*.35,0,drawing?-.32:-.1);
-  tvSet('rightUpperArm',drawing?-.82:-stride*.35,0,drawing?.24:.08);
-  tvSet('leftLowerArm',0,drawing?.5:.08,0);tvSet('rightLowerArm',0,drawing?1.12:.08,0);
-  tvSet('leftUpperLeg',drawing?1.05:stride,0,0);tvSet('rightUpperLeg',drawing?1.05:-stride,0,0);
-  tvSet('leftLowerLeg',drawing?-1.05:Math.max(0,-stride),0,0);tvSet('rightLowerLeg',drawing?-1.05:Math.max(0,stride),0,0);
+  const gesture=drawing?(activeSketch.drawMotion||0)*motionScale:0,stride=walking?Math.sin(activeSketch.time*Math.PI*4)*.24*motionScale:0;
+  tvSet('spine',-.34*crouch+gesture*.018,0,-.08*crouch);
+  tvSet('chest',-.12*crouch,0,0);tvSet('head',.24*crouch,0,-.08*crouch);
+  tvSet('leftUpperArm',-.48*crouch+stride*.35,0,-.32*crouch-.1);
+  tvSet('rightUpperArm',-.82*crouch+gesture*.22-stride*.35,0,.24*crouch+gesture*.1+.08);
+  tvSet('leftLowerArm',0,.5*crouch+.08,0);tvSet('rightLowerArm',0,1.12*crouch+gesture*.4+.08,0);
+  tvSet('rightHand',0,0,drawing?gesture*.3:0);
+  if(TVRM.bones.rightHand){
+   const hand=TVRM.bones.rightHand;hand.n.position.copy(hand.position);
+   if(crouch>0){
+    hand.n.position.x+=gesture*.1;hand.n.position.z+=Math.cos(activeSketch.time*2)*.04;
+     positionSketchPen(hand.n,crouch);
+   }
+  }
+  tvSet('leftUpperLeg',1.05*crouch+stride,0,0);tvSet('rightUpperLeg',1.05*crouch-stride,0,0);
+  tvSet('leftLowerLeg',-1.05*crouch+Math.max(0,-stride),0,0);tvSet('rightLowerLeg',-1.05*crouch+Math.max(0,stride),0,0);
   return;
  }
  const bounce=pulling?Math.abs(sway)*.02:0,walk=pulling?step*.42:0,pull=1+Math.sin(cartAnim.t*2.8)*.025*motionScale;
@@ -554,11 +619,12 @@ const cv=$('c');
 cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});tapDown={x:e.clientX,y:e.clientY,t:performance.now()};
  if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch=Math.hypot(a.x-b.x,a.y-b.y);tapDown=null}});
 cv.addEventListener('pointermove',e=>{const p=ptrs.get(e.pointerId);if(!p||menuOpen)return;const dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;
+ if(activeSketch)return;
  if(ptrs.size===1){yaw-=dx*.005;pitch=clamp(pitch+dy*.005,.05,1.35)}
  else if(ptrs.size===2){const[a,b]=[...ptrs.values()],d=Math.hypot(a.x-b.x,a.y-b.y);if(pinch)distT=clamp(distT*pinch/d,2.5,16);pinch=d}});
 const up=e=>{if(tapDown&&ptrs.has(e.pointerId)&&Math.hypot(e.clientX-tapDown.x,e.clientY-tapDown.y)<6&&performance.now()-tapDown.t<300)act();ptrs.delete(e.pointerId);tapDown=null;pinch=0};
 cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
-cv.addEventListener('wheel',e=>{e.preventDefault();distT=clamp(distT*(1+Math.sign(e.deltaY)*.1),2.5,16)},{passive:false});
+cv.addEventListener('wheel',e=>{e.preventDefault();if(!activeSketch)distT=clamp(distT*(1+Math.sign(e.deltaY)*.1),2.5,16)},{passive:false});
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 
 // Manette
@@ -711,8 +777,7 @@ function update(dt){
  let ix=(keys.r?1:0)-(keys.l?1:0)+joy.x+pd.x,iy=(keys.d?1:0)-(keys.u?1:0)+joy.y+pd.y;if(locked||cartAnim.active)ix=iy=0;
  const m0=Math.hypot(ix,iy),mg=Math.min(1,m0);if(m0>1){ix/=m0;iy/=m0}
 
- yaw-=pd.rx*2.6*dt;
- pitch=clamp(pitch+pd.ry*1.8*dt,.05,1.35);
+ if(!activeSketch){yaw-=pd.rx*2.6*dt;pitch=clamp(pitch+pd.ry*1.8*dt,.05,1.35)}
 
  const cosY=Math.cos(yaw),sinY=Math.sin(yaw);
  const moveX=sinY*iy+cosY*ix,moveZ=cosY*iy-sinY*ix;
@@ -755,7 +820,10 @@ function update(dt){
  else{armR.rotation.z=0;body.rotation.x=0;body.rotation.y=0;body.rotation.z=0;slash.material.opacity=0}
  vrmPose();
 
- if(!cartAnim.active){tgt.x=pos.x;tgt.z=pos.z;tgt.y+=(pos.y+1.7-tgt.y)*Math.min(1,dt*6)}
+ if(!activeSketch){
+  if(cartAnim.active){tgt.set(cart.position.x,cart.position.y+1.5,cart.position.z)}
+  else{tgt.x=pos.x;tgt.z=pos.z;tgt.y+=(pos.y+1.7-tgt.y)*Math.min(1,dt*6)}
+ }
  dirv.set(Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
  ray.set(tgt,dirv);ray.far=distT+.6;
  let want=distT;const h=ray.intersectObjects(camCols,false);
@@ -782,7 +850,7 @@ function update(dt){
 
  // Ambiance : voyageur qui te regarde, eau, particules
  {if(!activeSketch){let da=Math.atan2(pos.x-NPC.x,pos.z-NPC.z)-npc.rotation.y;da=Math.atan2(Math.sin(da),Math.cos(da));npc.rotation.y+=da*Math.min(1,dt*4)}
-  npc.scale.y=1+Math.sin(t*2)*.02*motionScale;tvPose(dt);mark.position.y=3.4+Math.sin(t*3)*.15*motionScale;water.position.y=-.5+Math.sin(t*.8)*.05*motionScale;
+  npc.scale.y=activeSketch?1:1+Math.sin(t*2)*.02*motionScale;tvPose(dt);mark.position.y=3.4+Math.sin(t*3)*.15*motionScale;water.position.y=-.5+Math.sin(t*.8)*.05*motionScale;
   for(let i=fx.length-1;i>=0;i--){const f=fx[i];f.l-=dt;f.s.position.addScaledVector(f.v,dt*motionScale);f.v.y-=6*dt*motionScale;f.s.material.opacity=Math.max(0,f.l);if(f.l<=0){scene.remove(f.s);fx.splice(i,1)}}}
 
  sky.position.copy(cam.position);
