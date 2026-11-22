@@ -340,10 +340,14 @@ const sketchPenScale=1.1,sketchPenTipOffset=.095;
 sketchArm.right.hand.add(sketchTool);sketchTool.position.set(0,0,.08);sketchTool.scale.setScalar(sketchPenScale);
 const sketchHandWorldPosition=new THREE.Vector3(),sketchToolWorldPosition=new THREE.Vector3(),sketchHandWorldRotation=new THREE.Quaternion();
 sketchTool.visible=false;
-function positionSketchPen(hand,crouch){
+function positionSketchPen(hand,crouch,target){
  hand.updateWorldMatrix(true,false);hand.getWorldPosition(sketchHandWorldPosition);
- const tipY=gy(sketchHandWorldPosition.x,sketchHandWorldPosition.z)+.015+sketchPenTipOffset*sketchPenScale;
- sketchToolWorldPosition.set(sketchHandWorldPosition.x,THREE.MathUtils.lerp(sketchHandWorldPosition.y,tipY,crouch),sketchHandWorldPosition.z);
+ const tipY=target?gy(target.x,target.z)+.015+sketchPenTipOffset*sketchPenScale:
+  gy(sketchHandWorldPosition.x,sketchHandWorldPosition.z)+.015+sketchPenTipOffset*sketchPenScale;
+ sketchToolWorldPosition.set(
+  target?target.x:sketchHandWorldPosition.x,
+  THREE.MathUtils.lerp(sketchHandWorldPosition.y,tipY,crouch),
+  target?target.z:sketchHandWorldPosition.z);
  sketchTool.position.copy(hand.worldToLocal(sketchToolWorldPosition));
  hand.getWorldQuaternion(sketchHandWorldRotation);sketchTool.quaternion.copy(sketchHandWorldRotation).invert();
 }
@@ -351,7 +355,7 @@ const easeInOut=x=>x*x*(3-2*x);
 const setSketchCrouch=(sketch,amount)=>{
  sketch.crouch=amount;
  const hips=TVRM.bones.hips;
- if(hips)hips.n.position.y=hips.position.y-1.1*amount;
+ if(hips)hips.n.position.y=hips.position.y-.55*amount;
  npc.position.y=sketch.stand.y+(TVRM.ok ? .1 : 0)*amount;
 };
 function beginGroundSketch(kind){
@@ -413,13 +417,12 @@ function updateGroundSketch(dt){
   }
  }
  if(!TVRM.ok){
-  const stride=sketch.phase==='approach'||sketch.phase==='return'?Math.sin(sketch.time*Math.PI*4)*.08:0;
+  const stride=sketch.phase==='approach'||sketch.phase==='return'?easeInOut(clamp(sketch.time/.75,0,1))*0.04:0;
   const reach=sketch.phase==='draw'?easeInOut(clamp(sketch.time/.8,0,1)):sketch.crouch;
-  const handSwing=sketch.phase==='draw'?Math.sin(clamp(sketch.time/sketch.art.strokes.length,0,1)*Math.PI)*.08:0;
-  sketchArm.right.upper.rotation.set(-.62*sketch.crouch-stride-reach*.18,0,.3-reach*.18);
-  sketchArm.right.lower.rotation.set(-.92*sketch.crouch-reach*.22,0,handSwing);
+  sketchArm.right.upper.rotation.set(-.48*sketch.crouch-stride-reach*.12,0,.24-reach*.12);
+  sketchArm.right.lower.rotation.set(-.68*sketch.crouch-reach*.18,0,0);
   if(sketch.crouch>0){
-   positionSketchPen(sketchArm.right.hand,sketch.crouch);
+   positionSketchPen(sketchArm.right.hand,sketch.crouch,sketch.phase==='draw'?sketch.drawTarget:null);
   }
   }
  npc.rotation.x=0;
@@ -499,22 +502,22 @@ function tvPose(dt){
  if(activeSketch){
   const drawing=activeSketch.phase==='draw',crouch=activeSketch.crouch||0;
   const walking=activeSketch.phase==='approach'||activeSketch.phase==='return';
-  const stride=walking?Math.sin(activeSketch.time*Math.PI*4)*.24*motionScale:0;
+  const stride=walking?Math.sin(activeSketch.time*Math.PI*2)*.08*motionScale:0;
   const reach=drawing?easeInOut(clamp((activeSketch.drawProgress||0)*1.15,0,1)):crouch;
-  tvSet('spine',-.52*crouch-reach*.08,0,-.08*crouch);
-  tvSet('chest',-.22*crouch-reach*.05,0,0);tvSet('head',.38*crouch+reach*.08,0,-.08*crouch);
-  tvSet('leftUpperArm',-.48*crouch+stride*.35,0,-.32*crouch-.1);
-  tvSet('rightUpperArm',-.98*crouch-reach*.16-stride*.35,0,.28*crouch+reach*.08+.08);
-  tvSet('leftLowerArm',0,.5*crouch+.08,0);tvSet('rightLowerArm',0,1.35*crouch+reach*.18+.08,0);
+  tvSet('spine',-.38*crouch-reach*.06,0,-.05*crouch);
+  tvSet('chest',-.16*crouch-reach*.04,0,0);tvSet('head',.28*crouch+reach*.06,0,-.04*crouch);
+  tvSet('leftUpperArm',-.38*crouch+stride*.2,0,-.24*crouch-.1);
+  tvSet('rightUpperArm',-.72*crouch-reach*.12-stride*.2,0,.22*crouch+reach*.06+.05);
+  tvSet('leftLowerArm',0,.38*crouch+.08,0);tvSet('rightLowerArm',0,.82*crouch+reach*.12+.08,0);
   tvSet('rightHand',0,0,0);
   if(TVRM.bones.rightHand){
    const hand=TVRM.bones.rightHand;hand.n.position.copy(hand.position);
    if(crouch>0){
-    positionSketchPen(hand.n,crouch);
+    positionSketchPen(hand.n,crouch,drawing?activeSketch.drawTarget:null);
    }
   }
-  tvSet('leftUpperLeg',1.05*crouch+stride,0,0);tvSet('rightUpperLeg',1.05*crouch-stride,0,0);
-  tvSet('leftLowerLeg',-1.05*crouch+Math.max(0,-stride),0,0);tvSet('rightLowerLeg',-1.05*crouch+Math.max(0,stride),0,0);
+  tvSet('leftUpperLeg',.48*crouch+stride,0,0);tvSet('rightUpperLeg',.48*crouch-stride,0,0);
+  tvSet('leftLowerLeg',-.48*crouch+Math.max(0,-stride),0,0);tvSet('rightLowerLeg',-.48*crouch+Math.max(0,stride),0,0);
   return;
  }
  const bounce=pulling?Math.abs(sway)*.02:0,walk=pulling?step*.42:0,pull=1+Math.sin(cartAnim.t*2.8)*.025*motionScale;
@@ -699,7 +702,7 @@ function meet(){Q([
 
 function startCartAnimation(){
  cartAnim.active=true;cartAnim.t=0;
- cartAnim.startPos.copy(cart.position);cartAnim.endPos.set(100,gy(100,14),14);
+ cartAnim.startPos.copy(cart.position);cartAnim.endPos.set(112,gy(112,14),14);
  cartAnim.direction.set(cartAnim.endPos.x-cartAnim.startPos.x,0,cartAnim.endPos.z-cartAnim.startPos.z).normalize();
  cartAnim.heading=Math.atan2(-cartAnim.direction.x,-cartAnim.direction.z);
  cart.rotation.y=cartAnim.heading;
@@ -715,7 +718,7 @@ function startCartAnimation(){
 function fight(){
  cartAnim.active=false;hero.visible=true;
  const x=Math.round(cart.position.x),z=Math.round(cart.position.z);
- cut(x+3,z,x,z);encounterPoint.copy(pos);stage=1;kills=0;R.toneMappingExposure=1.25;
+ cut(x+7,z-5,x-8,z+6);encounterPoint.copy(pos);stage=1;kills=0;R.toneMappingExposure=1.25;
  BANDITS.forEach((b,i)=>{const o=[[-9,-6],[9,-5],[0,-11]][i];b.x=pos.x+o[0];b.z=pos.z+o[1];b.hp=2;b.dead=0;b.g.rotation.x=0;b.g.visible=true});
  Q([['Voyageur','« Bandi ! Bandi ! »'],['Moi','Des bandits ! Je prends mon épée ! (Appuie sur ⚔️ pour attaquer.)']])}
 
