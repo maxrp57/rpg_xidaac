@@ -291,7 +291,7 @@ const npc=new THREE.Group();npc.position.set(NPC.x,gy(NPC.x,NPC.z),NPC.z);scene.
   const hand=new THREE.Group();hand.position.y=-.38;lower.add(hand);
   const palm=new THREE.Mesh(new THREE.SphereGeometry(.11,8,6),std('#e6a55d'));hand.add(palm);
   upper.rotation.z=sx*.35;
-  sketchArm[side]={upper,lower,hand};
+  sketchArm[side]={upper,lower,hand,handPosition:hand.position.clone()};
  });
  box(.42,.46,.2,'#6b4423',.6,.85,.45,npc);
  mm(new THREE.CylinderGeometry(.04,.04,2.7,6),'#4d2e16',-1.0,1.35,.35);mm(new THREE.SphereGeometry(.13,8,6),'#7de3ff',-1.0,2.75,.35)}
@@ -301,7 +301,7 @@ const mark=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTextur
 let activeSketch=null;
 function makeSketchArt(kind,x,z){
  const art=new THREE.Group(),y=gy(x,z)+.035,strokes=[];
- art.position.set(x,y,z);art.scale.setScalar(.62);scene.add(art);
+ art.position.set(x,y,z);art.scale.setScalar(.42);scene.add(art);
  const earth=new THREE.Mesh(new THREE.CircleGeometry(1.65,48),new THREE.MeshBasicMaterial({color:C('#654526'),transparent:true,opacity:.28,depthWrite:false}));
  earth.rotation.x=-Math.PI/2;earth.position.y=-.018;art.add(earth);
  const rim=new THREE.Mesh(new THREE.TorusGeometry(1.58,.018,5,48),new THREE.MeshBasicMaterial({color:C('#b9945d'),transparent:true,opacity:.45}));
@@ -338,8 +338,14 @@ const toolTip=new THREE.Mesh(new THREE.ConeGeometry(.035,.12,8),std('#f1cf75'));
 toolTip.position.y=-.035;toolTip.rotation.z=Math.PI;toolTip.castShadow=true;sketchTool.add(toolTip);
 const sketchPenScale=1.1,sketchPenTipOffset=.095;
 sketchArm.right.hand.add(sketchTool);sketchTool.position.set(0,0,.08);sketchTool.scale.setScalar(sketchPenScale);
-const sketchHandWorldPosition=new THREE.Vector3(),sketchToolWorldPosition=new THREE.Vector3(),sketchHandWorldRotation=new THREE.Quaternion();
+const sketchHandWorldPosition=new THREE.Vector3(),sketchToolWorldPosition=new THREE.Vector3(),sketchHandTarget=new THREE.Vector3(),sketchHandWorldRotation=new THREE.Quaternion();
 sketchTool.visible=false;
+function positionSketchHand(hand,rest,target){
+ if(!hand.parent||!target)return;
+ hand.position.copy(rest);hand.parent.updateWorldMatrix(true,false);hand.updateWorldMatrix(true,false);
+ hand.getWorldPosition(sketchHandWorldPosition);sketchHandTarget.copy(target);sketchHandTarget.y=sketchHandWorldPosition.y;
+ hand.parent.worldToLocal(sketchHandTarget);hand.position.copy(sketchHandTarget);
+}
 function positionSketchPen(hand,crouch){
  hand.updateWorldMatrix(true,false);hand.getWorldPosition(sketchHandWorldPosition);
  const tipY=gy(sketchHandWorldPosition.x,sketchHandWorldPosition.z)+.015+sketchPenTipOffset*sketchPenScale;
@@ -360,7 +366,7 @@ function beginGroundSketch(kind){
  const art=makeSketchArt(kind,x,z),drawX=x-fx*.78,drawZ=z-fz*.78;
  const cameraOffset=new THREE.Vector3().subVectors(cam.position,tgt);
  activeSketch={
-  kind,art,phase:'approach',time:0,crouch:0,aligned:false,from:npc.position.clone(),fromRotation:npc.rotation.y,fx,fz,
+  kind,art,phase:'approach',time:0,crouch:0,drawTarget:new THREE.Vector3(),from:npc.position.clone(),fromRotation:npc.rotation.y,fx,fz,
   stand:new THREE.Vector3(drawX,gy(drawX,drawZ),drawZ),standRotation:Math.atan2(fx,fz),
   camera:{yaw,pitch,distT,target:tgt.clone()},
   focusYaw:Math.atan2(cameraOffset.x,cameraOffset.z),
@@ -382,29 +388,18 @@ function updateGroundSketch(dt){
   if(p>=1){sketch.phase='draw';sketch.time=0}
  }else if(sketch.phase==='draw'){
   setSketchCrouch(sketch,1);
-  if(!sketch.aligned){
-   const hand=TVRM.ok&&TVRM.bones.rightHand?TVRM.bones.rightHand.n:sketchArm.right.hand;
-   if(hand){
-    npc.updateMatrixWorld(true);hand.updateWorldMatrix(true,false);hand.getWorldPosition(sketchHandWorldPosition);
-    sketch.art.x=sketchHandWorldPosition.x;sketch.art.z=sketchHandWorldPosition.z;
-    sketch.art.y=gy(sketch.art.x,sketch.art.z)+.035;
-    sketch.art.art.position.set(sketch.art.x,sketch.art.y,sketch.art.z);
-    sketch.focusTarget.set(sketch.art.x,gy(sketch.art.x,sketch.art.z)+.65,sketch.art.z);
-   }
-   sketch.aligned=true;
-  }
   const totalLength=sketch.art.strokes.reduce((sum,stroke)=>sum+stroke.length,0);
-  const duration=Math.max(6,sketch.art.strokes.length*.72),progress=clamp(sketch.time/duration,0,1);
-  let remaining=progress*totalLength,index=sketch.art.strokes.length-1;
+  const duration=Math.max(12,sketch.art.strokes.length*.72),progress=clamp(sketch.time/duration,0,1);
+  let remaining=progress*totalLength,index=sketch.art.strokes.length-1,u=1;
   for(let i=0;i<sketch.art.strokes.length;i++){
    const stroke=sketch.art.strokes[i],reveal=clamp(remaining/stroke.length,0,1);
    const count=Math.floor(stroke.count*reveal/3)*3;
    stroke.glowGeometry.setDrawRange(0,count);stroke.lineGeometry.setDrawRange(0,count);
-   if(reveal<1){index=i;break}
+   if(reveal<1){index=i;u=reveal;break}
    remaining-=stroke.length;
   }
-  const stroke=sketch.art.strokes[index],u=clamp(remaining/stroke.length,0,1);
-  sketch.drawMotion=Math.sin(u*Math.PI*2);
+  const stroke=sketch.art.strokes[index],point=stroke.curve.getPointAt(u),scale=sketch.art.art.scale.x;
+  sketch.drawTarget.set(sketch.art.x+point.x*scale,sketch.art.y+point.y*scale,sketch.art.z+point.z*scale);
   if(progress>=1){sketch.phase='rise';sketch.time=0;sketchTool.visible=false}
  }else if(sketch.phase==='rise'){
    const p=easeInOut(clamp(sketch.time/.75,0,1));setSketchCrouch(sketch,1-p);
@@ -423,10 +418,14 @@ function updateGroundSketch(dt){
   }
  }
  if(!TVRM.ok){
-  const stride=sketch.phase==='approach'||sketch.phase==='return'?Math.sin(sketch.time*Math.PI*4)*.08:0,motion=sketch.phase==='draw'?(sketch.drawMotion||0):0;
-  sketchArm.right.upper.rotation.set(-.62*sketch.crouch-stride,0,.3+motion*.14);
-  sketchArm.right.lower.rotation.set(-.92*sketch.crouch+motion*.28,0,0);
-   if(sketch.crouch>0)positionSketchPen(sketchArm.right.hand,sketch.crouch);
+  const stride=sketch.phase==='approach'||sketch.phase==='return'?Math.sin(sketch.time*Math.PI*4)*.08:0;
+  sketchArm.right.upper.rotation.set(-.62*sketch.crouch-stride,0,.3);
+  sketchArm.right.lower.rotation.set(-.92*sketch.crouch,0,0);
+  if(sketch.crouch>0){
+   if(sketch.phase==='draw')positionSketchHand(sketchArm.right.hand,sketchArm.right.handPosition,sketch.drawTarget);
+   else sketchArm.right.hand.position.copy(sketchArm.right.handPosition);
+   positionSketchPen(sketchArm.right.hand,sketch.crouch);
+  }
   }
  npc.rotation.x=sketch.phase==='draw'?.18:0;
  const cameraEase=cfg.reduceMotion?1:Math.min(1,dt*2.3);
@@ -505,18 +504,18 @@ function tvPose(dt){
  if(activeSketch){
   const drawing=activeSketch.phase==='draw',crouch=activeSketch.crouch||0;
   const walking=activeSketch.phase==='approach'||activeSketch.phase==='return';
-  const gesture=drawing?(activeSketch.drawMotion||0)*motionScale:0,stride=walking?Math.sin(activeSketch.time*Math.PI*4)*.24*motionScale:0;
-  tvSet('spine',-.34*crouch+gesture*.018,0,-.08*crouch);
+  const stride=walking?Math.sin(activeSketch.time*Math.PI*4)*.24*motionScale:0;
+  tvSet('spine',-.34*crouch,0,-.08*crouch);
   tvSet('chest',-.12*crouch,0,0);tvSet('head',.24*crouch,0,-.08*crouch);
   tvSet('leftUpperArm',-.48*crouch+stride*.35,0,-.32*crouch-.1);
-  tvSet('rightUpperArm',-.82*crouch+gesture*.22-stride*.35,0,.24*crouch+gesture*.1+.08);
-  tvSet('leftLowerArm',0,.5*crouch+.08,0);tvSet('rightLowerArm',0,1.12*crouch+gesture*.4+.08,0);
-  tvSet('rightHand',0,0,drawing?gesture*.3:0);
+  tvSet('rightUpperArm',-.82*crouch-stride*.35,0,.24*crouch+.08);
+  tvSet('leftLowerArm',0,.5*crouch+.08,0);tvSet('rightLowerArm',0,1.12*crouch+.08,0);
+  tvSet('rightHand',0,0,0);
   if(TVRM.bones.rightHand){
    const hand=TVRM.bones.rightHand;hand.n.position.copy(hand.position);
    if(crouch>0){
-    hand.n.position.x+=gesture*.1;hand.n.position.z+=Math.cos(activeSketch.time*2)*.04;
-     positionSketchPen(hand.n,crouch);
+    if(drawing){npc.updateMatrixWorld(true);positionSketchHand(hand.n,hand.position,activeSketch.drawTarget)}
+    positionSketchPen(hand.n,crouch);
    }
   }
   tvSet('leftUpperLeg',1.05*crouch+stride,0,0);tvSet('rightUpperLeg',1.05*crouch-stride,0,0);
